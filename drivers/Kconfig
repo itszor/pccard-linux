@@ -1,0 +1,11 @@
+menu "Aleph One PC card (!PC)"
+
+config ALEPHPC_APCDISK
+	tristate "!PC's hard discs and swap device (apcdisk)"
+	depends on X86_32 && BLOCK && ISA
+	help
+	  The hard discs (HD0, HD1) and swap device that Aleph One's !PC
+	  gives the PC card, as /dev/apda, /dev/apdb and /dev/apdc, through
+	  !PC's HPC calls.
+
+endmenu

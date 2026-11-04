@@ -1,0 +1,34 @@
+#!/bin/sh
+# udhcpc's script (busybox's DHCP client, run by ifupdown): set the address,
+# routes and DNS servers it was given. Plain sh, and busybox's ifconfig and
+# route, as net-tools is not installed.
+
+[ -n "$1" ] || { echo "Error: should be called from udhcpc"; exit 1; }
+
+case "$1" in
+deconfig)
+	busybox ifconfig "$interface" 0.0.0.0
+	;;
+renew|bound)
+	busybox ifconfig "$interface" "$ip" ${subnet:+netmask $subnet} \
+		broadcast "${broadcast:-+}"
+	if [ -n "$router" ]; then
+		while busybox route del default dev "$interface" 2>/dev/null; do
+			:
+		done
+		metric=0
+		for r in $router; do
+			busybox route add default gw "$r" dev "$interface" \
+				metric "$metric"
+			metric=$((metric + 1))
+		done
+	fi
+	{
+		[ -n "$domain" ] && echo "search $domain"
+		for d in $dns; do
+			echo "nameserver $d"
+		done
+	} > /etc/resolv.conf.new && mv /etc/resolv.conf.new /etc/resolv.conf
+	;;
+esac
+exit 0

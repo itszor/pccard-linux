@@ -1,0 +1,29 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          apdswap
+# Required-Start:    mountdevsubfs
+# Required-Stop:
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: Swap to !PC's swap device, /dev/apdc
+# Description:       !PC keeps the PC's swap device in a RISC OS dynamic area
+#                    (its SwapSize option). Nothing in it outlives !PC, so it
+#                    is made afresh at each boot. There is no apdc without
+#                    SwapSize, or with a !PC older than 3.09.
+### END INIT INFO
+
+case "$1" in
+start)
+	if [ -b /dev/apdc ] && mkswap /dev/apdc >/dev/null 2>&1 &&
+	   swapon /dev/apdc; then
+		echo "Swapping to !PC's swap device, /dev/apdc."
+	fi
+	;;
+stop|restart|force-reload|status)
+	;;
+*)
+	echo "Usage: $0 start" >&2
+	exit 3
+	;;
+esac
+exit 0

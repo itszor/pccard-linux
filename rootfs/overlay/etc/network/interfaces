@@ -1,0 +1,8 @@
+# !PC's NE2000 (PCNE2): the kernel is told where it is (netdev= on its
+# command line), and DHCP gets it an address - from PCNAT when that is the
+# interface PCNE2 is on.
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet dhcp

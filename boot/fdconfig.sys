@@ -1,0 +1,13 @@
+menucolor=7,1
+menu Linux for the PC card
+menu
+menu   1  Linux, text console
+menu   2  Linux, framebuffer (800x600, for X)
+menu   3  FreeDOS prompt
+menu
+menudefault=1,3
+rem loadlin as the shell: the kernel never returns. Its .PAR files hold the
+rem kernel command line.
+1?shell=\loadlin.exe @\linux.par
+2?shell=\loadlin.exe @\linuxfb.par
+3?shell=\command.com /e:512 /p

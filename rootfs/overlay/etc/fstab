@@ -1,0 +1,6 @@
+# The PC card's disc is !PC's HD0: apda1 boots it (FAT), apda2 is this.
+/dev/apda2	/		ext2	noatime,errors=remount-ro	0 1
+proc		/proc		proc	defaults			0 0
+tmpfs		/tmp		tmpfs	defaults			0 0
+/dev/apda1	/boot		vfat	noauto,noatime			0 0
+# /dev/apdc, !PC's swap device, is set up by /etc/init.d/apdswap.

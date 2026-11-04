@@ -1,0 +1,4 @@
+\bzimage
+root=/dev/apda2 ro
+netdev=5,0x340,eth0
+vga=787
