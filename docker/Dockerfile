@@ -4,7 +4,7 @@ FROM debian/eol:buster
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc make bc bison flex \
         libc6-dev xz-utils cpio kmod libelf-dev \
-        debootstrap debian-archive-keyring e2fsprogs dosfstools mtools \
-        fdisk syslinux syslinux-common python3 nasm unzip && \
+        debootstrap debian-archive-keyring e2fsprogs dosfstools mtools curl \
+        fdisk syslinux syslinux-common python3 nasm unzip bzip2 && \
     apt-get clean
 WORKDIR /work

@@ -1,0 +1,5 @@
+// Debian 7 is on archive.debian.org now: its Release file's Valid-Until
+// date has passed, and the keys that signed it have expired. apt here
+// can't check expired keys, so installing needs --allow-unauthenticated
+// (each package is still checked against the Packages file's hashes).
+Acquire::Check-Valid-Until "false";

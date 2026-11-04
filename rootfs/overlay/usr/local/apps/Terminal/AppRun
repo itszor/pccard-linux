@@ -1,0 +1,3 @@
+#!/bin/sh
+# ROX-Filer application directory: a terminal.
+exec xterm "$@"

@@ -1,8 +1,9 @@
 The boot partition (apda1), FAT16, booted by FreeDOS:
 
   KERNEL.SYS    FreeDOS's kernel, from its FAT16 boot sector
-  FDCONFIG.SYS  a menu: Linux on the text console (the default, after 3s),
-                Linux on the VESA framebuffer, or a FreeDOS prompt
+  FDCONFIG.SYS  a menu: the Linux desktop (the default, after 3s; X on
+                the VESA framebuffer), Linux on the text console, or a
+                FreeDOS prompt
   LOADLIN.EXE   loads Linux from DOS; run as FreeDOS's shell
   LINUX.PAR     the kernel command line for each; netdev= tells the kernel
   LINUXFB.PAR   where !PC's NE2000 is (PCNE2: IRQ 5, 0x340), as left to itself

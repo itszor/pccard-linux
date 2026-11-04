@@ -1,0 +1,28 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          ssh-hostkeys
+# Required-Start:    $local_fs
+# Required-Stop:
+# X-Start-Before:    sshd
+# Default-Start:     2 3 4 5
+# Default-Stop:
+# Short-Description: Make this machine's own ssh host keys, at first boot
+# Description:       The disc image is shared, so it carries no ssh host
+#                    keys: each machine makes its own the first time.
+### END INIT INFO
+
+case "$1" in
+start)
+	if ! ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1; then
+		echo "Making ssh host keys (once; this takes a while on a 486)..."
+		ssh-keygen -A
+	fi
+	;;
+stop|restart|force-reload|status)
+	;;
+*)
+	echo "Usage: $0 start" >&2
+	exit 3
+	;;
+esac
+exit 0

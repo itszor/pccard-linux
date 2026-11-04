@@ -1,0 +1,6 @@
+
+# On tty1, booted with the framebuffer (FreeDOS's menu option 2), start the
+# desktop; leaving it comes back to this shell.
+if [ -z "$DISPLAY" ] && [ "$(tty)" = /dev/tty1 ] && [ -c /dev/fb0 ]; then
+	startx
+fi

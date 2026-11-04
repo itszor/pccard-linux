@@ -1,0 +1,7 @@
+# Libraries check486 lets through though they contain CMOV, because they
+# choose their code by the CPU at run time (CPUID), and on a 486, which has
+# none of the features those paths need, they never run them. One per line:
+# a path in the root filesystem, then why.
+/usr/lib/i386-linux-gnu/libcrypto.so.1.0.0	CMOV only in OPENSSL_ia32_rdrand, used where CPUID has RDRAND
+/usr/lib/i386-linux-gnu/libgmp.so.10.0.5	CMOV only in the k7, p6 and pentium4 variants of GMP's fat build
+/usr/lib/i386-linux-gnu/libpixman-1.so.0.26.0	CMOV only in the SSE2 paths, used where CPUID has SSE2

@@ -1,0 +1,28 @@
+# Installed into the root filesystem by setup.sh, without recommends. All
+# from Debian 7 (wheezy); check486 checks they suit the 486.
+
+# Everyday tools
+less iputils-ping nano wget psmisc net-tools iproute openssh-client
+
+# ssh in: its host keys are made at first boot (ssh-hostkeys), not shipped,
+# and it refuses empty passwords, so set one with passwd first
+openssh-server
+
+# X on the VESA framebuffer, with !PC's keyboard and bus mouse, configured
+# by /etc/X11/xorg.conf as there is no udev to find them. xserver-xorg has
+# /usr/bin/X, which lets the user start X.
+xserver-xorg xserver-xorg-core xserver-xorg-video-fbdev xserver-xorg-input-kbd
+xserver-xorg-input-mouse xinit xauth xfonts-base
+
+# The desktop: JWM, ROX-Filer's pinboard and panel, a terminal, and Dillo,
+# a small web browser (FLTK; wheezy's NetSurf is the larger GTK one)
+jwm rox-filer xterm ttf-dejavu-core dillo
+
+# For ROX's applications (build.sh's rox step): Python and GTK for Edit,
+# Archive, Memo, MIME-Editor and Wallpaper; libwnck for Pager; and the
+# compressors Archive drives
+python-gtk2 libwnck22 bzip2 xz-utils zip unzip
+
+# Today's root certificates replace these (setup.sh); curl, as Debian 7's
+# wget (GnuTLS) can't talk to most HTTPS sites now and its curl (OpenSSL) can
+ca-certificates curl

@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<!-- JWM, with RISC OS's colours: cream title bar on the window with the
+     input focus, grey on the others. ROX-Filer's pinboard and panel do
+     the rest, so there is no JWM tray. -->
+<JWM>
+	<RootMenu onroot="123">
+		<Program label="Terminal">xterm</Program>
+		<Program label="Filer">rox</Program>
+		<Separator/>
+		<Restart label="Restart JWM"/>
+		<Exit label="Leave the desktop" confirm="true"/>
+	</RootMenu>
+
+	<WindowStyle>
+		<Font>DejaVu Sans-9</Font>
+		<Width>3</Width>
+		<Height>20</Height>
+		<Active>
+			<Text>black</Text>
+			<Title>#ffffbb</Title>
+			<Outline>black</Outline>
+		</Active>
+		<Inactive>
+			<Text>black</Text>
+			<Title>#dddddd</Title>
+			<Outline>#777777</Outline>
+		</Inactive>
+	</WindowStyle>
+
+	<MenuStyle>
+		<Font>DejaVu Sans-9</Font>
+		<Foreground>black</Foreground>
+		<Background>#eeeeee</Background>
+		<ActiveForeground>white</ActiveForeground>
+		<ActiveBackground>#555555</ActiveBackground>
+	</MenuStyle>
+
+	<FocusModel>click</FocusModel>
+	<Desktops count="1"/>
+
+	<Key mask="CA" key="t">exec:xterm</Key>
+	<Key mask="CA" key="BackSpace">exit</Key>
+	<Key mask="A" key="Tab">next</Key>
+	<Key mask="A" key="F4">close</Key>
+</JWM>

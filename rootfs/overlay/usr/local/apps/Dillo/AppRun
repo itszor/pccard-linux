@@ -1,0 +1,3 @@
+#!/bin/sh
+# ROX-Filer application directory: Dillo, a small web browser.
+exec dillo "$@"

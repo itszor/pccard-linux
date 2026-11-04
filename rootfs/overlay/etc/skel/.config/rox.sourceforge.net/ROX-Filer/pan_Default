@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<panel side="Bottom">
+  <start>
+    <icon label="Home">/home/pc</icon>
+    <icon label="Apps">/usr/local/apps</icon>
+    <icon label="Terminal">/usr/local/apps/Terminal</icon>
+    <icon label="Dillo">/usr/local/apps/Dillo</icon>
+    <icon label="Edit">/usr/local/apps/Edit</icon>
+  </start>
+  <end/>
+</panel>
