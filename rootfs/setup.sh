@@ -10,6 +10,11 @@ sed -i 's/^\([2-6]:23:respawn\)/#\1/' /etc/inittab
 ln -sf /bin/busybox /sbin/udhcpc
 insserv apdswap
 
+# The kernel sets the clock from the CMOS at boot. hwclock would have no
+# /dev/rtc (there is no RTC driver: see config/pccard.config), and !PC's
+# CMOS clock follows RISC OS's, so there is nothing to write back to it.
+insserv -r hwclock.sh
+
 # No password for root: it is a single-user machine with no remote logins.
 passwd -d root >/dev/null
 
