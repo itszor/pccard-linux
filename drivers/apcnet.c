@@ -27,8 +27,10 @@
  * !PC has it, as for apcdisk's shared buffer: on a PC card the PC's cache
  * would otherwise keep copies of what the ARM writes behind it, and hold
  * back the PC's own writes from the ARM. The Gemini card's write FIFO can
- * still deliver memory writes after a later port write, so !PC waits for
- * the values the port writes name (tx_head, the magic word) to arrive.
+ * still deliver memory writes after a later port write, so !PC waits, on a
+ * callback once the PC has gone on, for the values the port writes name
+ * (tx_head, the magic word) to arrive; attaching is answered in the
+ * status word a little after the port write.
  */
 
 #include <linux/module.h>
@@ -44,6 +46,7 @@
 #include <linux/gfp.h>
 #include <linux/io.h>
 #include <linux/delay.h>
+#include <linux/jiffies.h>
 #include <asm/set_memory.h>
 #include <asm/special_insns.h>
 
@@ -162,7 +165,8 @@ static inline u32 ring_word(const u8 *ring, u32 size, u32 pos)
 static int apn_attach(struct net_device *dev)
 {
 	struct apn_priv *p = netdev_priv(dev);
-	int i;
+	unsigned long end;
+	int status;
 
 	sh_write(p, W_MAGIC, 0);
 	sh_write(p, W_VERSION, APN_VERSION);
@@ -189,12 +193,19 @@ static int apn_attach(struct net_device *dev)
 	outw(p->phys >> 16, dev->base_addr + APN_PARHI);
 	outw(APN_CMD_ATTACH, dev->base_addr + APN_CMD);
 
-	/* !PC answers before the OUT completes; allow for a slow write back. */
-	for (i = 0; i < 1000 && sh_read(p, W_STATUS) == 0; i++)
-		udelay(10);
-	if (sh_read(p, W_STATUS) != 1) {
-		netdev_err(dev, "!PC refused the rings (status %d)\n",
-			   (int)sh_read(p, W_STATUS));
+	/* !PC looks at the block on a callback, once the writes above have
+	   left the Gemini card's write FIFO, which they can't while the OUT
+	   holds the PC in the mailbox; so wait for its answer. */
+	end = jiffies + 2 * HZ;
+	while (sh_read(p, W_STATUS) == 0 && time_before(jiffies, end))
+		msleep(1);
+	status = sh_read(p, W_STATUS);
+	if (status == 0) {
+		netdev_err(dev, "!PC did not answer the attach\n");
+		return -EIO;
+	}
+	if (status != 1) {
+		netdev_err(dev, "!PC refused the rings (status %d)\n", status);
 		return -EIO;
 	}
 	p->attached = true;
