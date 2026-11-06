@@ -5,8 +5,8 @@
  * !PC's NE2000 is software on the ARM, and every register access and every
  * word of a frame through its data port is a trip through the Gemini
  * mailbox. !PC 3.09 (pcpro3, branch apcnet) adds a fast path beside it on
- * ports 0x310-0x317: the frames go through two rings in the PC's own
- * memory, which !PC reads and writes directly, so sending costs the PC one
+ * ports 0x310-0x317: the frames go through two rings in a block of memory
+ * !PC shares with the PC, which it reads and writes directly, so sending costs the PC one
  * port write and receiving one port read per batch. It is the same card -
  * the same PCNE2 connection (PCNAT, or a real network), Ethernet address
  * and IRQ - so when the fast path is there this driver takes the NE2000's
@@ -16,17 +16,21 @@
  * The protocol is described in !PC's DEV.c.NE2000, under "Fast path"; the
  * definitions here must match it. In short:
  *
- *   0x310  write: command; read: 0x4E50 if the fast path is there
- *   0x312  write: parameter bits 0-15; read: version (1)
+ *   0x310  write: command; read: 0x4E50 if the fast path is there, or
+ *          after the WHERE command, the shared block's address >> 4 and
+ *          then its length >> 4
+ *   0x312  write: parameter bits 0-15; read: version (3)
  *   0x314  write: parameter bits 16-31; read: how the last attach went
  *   0x316  write: tx_head's low 16 bits, after queueing frames, unless
  *          !PC's tx_busy says it is sending already;
  *          read: what interrupted (APN_INT_*), which also clears it
  *
- * The block holding both rings is physically contiguous, and uncached while
- * !PC has it, as for apcdisk's shared buffer: on a PC card the PC's cache
- * would otherwise keep copies of what the ARM writes behind it, and hold
- * back the PC's own writes from the ARM. The Gemini card's write FIFO can
+ * The block holding both rings is !PC's, in the E0000-EFFFF window it
+ * shares with the PC, as HPC's buffers are: on a real card the Gemini's L2
+ * cache holds the PC's ordinary RAM and doesn't see the ARM write to it,
+ * whatever the page tables say (version 1 had the rings there, and the PC
+ * never saw !PC's answer). The PC's own cache is kept off it too
+ * (set_memory_uc), as for apcdisk's shared buffer. The Gemini card's write FIFO can
  * still deliver memory writes after a later port write, so !PC waits, on a
  * callback once the PC has gone on, for the values the port writes name
  * (tx_head, the magic word) to arrive; attaching is answered in the
@@ -74,12 +78,15 @@ MODULE_PARM_DESC(disable, "leave !PC's NE2000 to ne.c");
 #define NE_PORTS	0x20
 
 #define APN_ID		0x4E50
-#define APN_VERSION	1
+#define APN_VERSION	3	/* 1 had the rings in the PC's own RAM, 2
+				   power-of-two rings in a 16K block */
 
 #define APN_CMD_ATTACH	1
 #define APN_CMD_DETACH	2
 #define APN_CMD_RXOPTS	3
 #define APN_CMD_RXKICK	4
+#define APN_CMD_WHERE	5	/* next two reads of APN_CMD: the block's
+				   address >> 4, then its length >> 4 */
 
 /* What reading APN_PARHI says about the last attach: */
 #define APN_ATTACH_NONE		0	/* never asked */
@@ -107,14 +114,14 @@ enum {
 	W_HDRWORDS = 32
 };
 
-/* 64K: the header's page, a 16K send ring and a 32K receive ring. */
-#define APN_ORDER	4
-#define APN_PAGES	(1 << APN_ORDER)
-#define APN_SIZE	(PAGE_SIZE << APN_ORDER)
-#define APN_TXOFF	0x1000
-#define APN_TXSIZE	0x4000
-#define APN_RXOFF	0x8000
-#define APN_RXSIZE	0x8000
+/* !PC's shared block (16K, or 32K when the Windows driver has none): this
+   header, then the send ring, then the receive ring, which is half the
+   block. Ring sizes are multiples of 4, and offsets in a ring wrap at its
+   size; a ring is never filled to its last word, so head == tail is
+   empty. */
+#define APN_HDRSIZE	(W_HDRWORDS * 4)
+#define APN_MINBLOCK	0x4000
+#define APN_MAXBLOCK	0x10000
 
 #define APN_MAXFRAME	1514
 #define APN_MAXREC	((4 + APN_MAXFRAME + 3) & ~3)
@@ -122,6 +129,7 @@ enum {
 struct apn_priv {
 	u32 *sh;			/* the shared block, uncached */
 	u8 *txring, *rxring;
+	u32 size, txsize, rxsize;
 	unsigned long virt;
 	phys_addr_t phys;
 	spinlock_t lock;		/* the send ring and flags */
@@ -142,9 +150,19 @@ static inline void sh_write(struct apn_priv *p, int w, u32 v)
 
 /* ---- Rings ---- */
 
+static inline u32 ring_wrap(u32 pos, u32 size)
+{
+	return pos >= size ? pos - size : pos;
+}
+
+static inline u32 ring_used(u32 head, u32 tail, u32 size)
+{
+	return head >= tail ? head - tail : head + size - tail;
+}
+
 static void ring_write(u8 *ring, u32 size, u32 pos, const void *src, u32 len)
 {
-	u32 off = pos & (size - 1), first = min(size - off, len);
+	u32 off = ring_wrap(pos, size), first = min(size - off, len);
 
 	memcpy(ring + off, src, first);
 	if (len > first)
@@ -153,7 +171,7 @@ static void ring_write(u8 *ring, u32 size, u32 pos, const void *src, u32 len)
 
 static void ring_read(void *dst, const u8 *ring, u32 size, u32 pos, u32 len)
 {
-	u32 off = pos & (size - 1), first = min(size - off, len);
+	u32 off = ring_wrap(pos, size), first = min(size - off, len);
 
 	memcpy(dst, ring + off, first);
 	if (len > first)
@@ -162,7 +180,7 @@ static void ring_read(void *dst, const u8 *ring, u32 size, u32 pos, u32 len)
 
 static inline u32 ring_word(const u8 *ring, u32 size, u32 pos)
 {
-	return READ_ONCE(*(const u32 *)(ring + (pos & (size - 1))));
+	return READ_ONCE(*(const u32 *)(ring + ring_wrap(pos, size)));
 }
 
 /* ---- Attaching ---- */
@@ -175,11 +193,11 @@ static int apn_attach(struct net_device *dev)
 
 	sh_write(p, W_MAGIC, 0);
 	sh_write(p, W_VERSION, APN_VERSION);
-	sh_write(p, W_SIZE, APN_SIZE);
-	sh_write(p, W_TXOFF, APN_TXOFF);
-	sh_write(p, W_TXSIZE, APN_TXSIZE);
-	sh_write(p, W_RXOFF, APN_RXOFF);
-	sh_write(p, W_RXSIZE, APN_RXSIZE);
+	sh_write(p, W_SIZE, p->size);
+	sh_write(p, W_TXOFF, p->txring - (u8 *)p->sh);
+	sh_write(p, W_TXSIZE, p->txsize);
+	sh_write(p, W_RXOFF, p->rxring - (u8 *)p->sh);
+	sh_write(p, W_RXSIZE, p->rxsize);
 	sh_write(p, W_TXHEAD, 0);
 	sh_write(p, W_TXTAIL, 0);
 	sh_write(p, W_RXHEAD, 0);
@@ -258,7 +276,8 @@ static void apn_detach(struct net_device *dev)
 
 static inline u32 tx_room(struct apn_priv *p)
 {
-	return APN_TXSIZE - (sh_read(p, W_TXHEAD) - sh_read(p, W_TXTAIL));
+	return p->txsize - 4 -
+		ring_used(sh_read(p, W_TXHEAD), sh_read(p, W_TXTAIL), p->txsize);
 }
 
 static netdev_tx_t apn_start_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -278,10 +297,10 @@ static netdev_tx_t apn_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	   room, so this one fits. */
 	head = sh_read(p, W_TXHEAD);
 	word = len;
-	ring_write(p->txring, APN_TXSIZE, head, &word, 4);
-	ring_write(p->txring, APN_TXSIZE, head + 4, skb->data, len);
+	ring_write(p->txring, p->txsize, head, &word, 4);
+	ring_write(p->txring, p->txsize, head + 4, skb->data, len);
 	wmb();
-	head += (4 + len + 3) & ~3;
+	head = ring_wrap(head + ((4 + len + 3) & ~3), p->txsize);
 	sh_write(p, W_TXHEAD, head);
 	/* !PC sets tx_busy on a kick and clears it only once it has looked
 	   for more, so while it's set this frame will be found. */
@@ -321,12 +340,12 @@ static void apn_rx(struct net_device *dev)
 			break;
 		rmb();
 		while (tail != head) {
-			u32 len = ring_word(p->rxring, APN_RXSIZE, tail) & 0xFFFF;
+			u32 len = ring_word(p->rxring, p->rxsize, tail) & 0xFFFF;
 			u32 rec = (4 + len + 3) & ~3;
 			struct sk_buff *skb;
 
 			if (len < ETH_HLEN || len > APN_MAXFRAME + 4 ||
-			    rec > head - tail) {
+			    rec > ring_used(head, tail, p->rxsize)) {
 				netdev_warn(dev, "bad record (length %u), "
 					    "receive ring emptied\n", len);
 				dev->stats.rx_errors++;
@@ -338,13 +357,13 @@ static void apn_rx(struct net_device *dev)
 				dev->stats.rx_dropped++;
 			} else {
 				ring_read(skb_put(skb, len), p->rxring,
-					  APN_RXSIZE, tail + 4, len);
+					  p->rxsize, tail + 4, len);
 				skb->protocol = eth_type_trans(skb, dev);
 				netif_rx(skb);
 				dev->stats.rx_packets++;
 				dev->stats.rx_bytes += len;
 			}
-			tail += rec;
+			tail = ring_wrap(tail + rec, p->rxsize);
 		}
 		mb();
 		sh_write(p, W_RXTAIL, tail);
@@ -457,14 +476,14 @@ static const struct net_device_ops apn_ops = {
 /* ---- Setting up ---- */
 
 /* Which driver this is, in its messages, to tell builds apart. */
-#define APN_REVISION	3
+#define APN_REVISION	5
 
 static struct net_device *apn_found;	/* tried, to be registered */
 
 static void apn_free_rings(struct apn_priv *p)
 {
-	set_memory_wb(p->virt, APN_PAGES);
-	free_pages(p->virt, APN_ORDER);
+	/* !PC's; only our view of it */
+	set_memory_wb(p->virt, p->size >> PAGE_SHIFT);
 }
 
 /*
@@ -477,18 +496,39 @@ static int __init apn_claim(void)
 {
 	struct net_device *dev;
 	struct apn_priv *p;
+	unsigned long phys, size;
+	int version;
 
 	if (disable)
 		return 0;
 	if (!request_region(io, APN_PORTS, APN_NAME))
 		return 0;
-	if (inw(io + APN_CMD) != APN_ID || inw(io + APN_PARLO) != APN_VERSION) {
+	if (inw(io + APN_CMD) != APN_ID) {
 		pr_info(APN_NAME " %d: no fast path at %#x; the NE2000 is "
 			"ne.c's\n", APN_REVISION, io);
 		goto out_region;
 	}
-	pr_info(APN_NAME " %d: fast path at %#x, trying it\n", APN_REVISION,
-		io);
+	version = inw(io + APN_PARLO);
+	if (version != APN_VERSION) {
+		pr_info(APN_NAME " %d: this !PC's fast path is version %d, not "
+			"%d\n", APN_REVISION, version, APN_VERSION);
+		goto out_region;
+	}
+	/* Where !PC's shared block is: in the 640K-1M window, which the
+	   card's L2 cache leaves alone, so that what the ARM writes there
+	   is what the PC reads. */
+	outw(APN_CMD_WHERE, io + APN_CMD);
+	phys = (unsigned long)inw(io + APN_CMD) << 4;
+	size = (unsigned long)inw(io + APN_CMD) << 4;
+	if (phys < 0xA0000 || phys + size > 0x100000 ||
+	    size < APN_MINBLOCK || size > APN_MAXBLOCK ||
+	    (phys & ~PAGE_MASK) || (size & ~PAGE_MASK)) {
+		pr_info(APN_NAME " %d: !PC has no shared block for the fast "
+			"path (%#lx, %#lx)\n", APN_REVISION, phys, size);
+		goto out_region;
+	}
+	pr_info(APN_NAME " %d: fast path at %#x, %luK block at %#lx, trying "
+		"it\n", APN_REVISION, io, size >> 10, phys);
 
 	dev = alloc_etherdev(sizeof(*p));
 	if (!dev)
@@ -496,22 +536,24 @@ static int __init apn_claim(void)
 	p = netdev_priv(dev);
 	spin_lock_init(&p->lock);
 
-	p->virt = __get_free_pages(GFP_KERNEL, APN_ORDER);
-	if (!p->virt)
-		goto out_free;
-	if (set_memory_uc(p->virt, APN_PAGES)) {
+	/* The kernel maps 640K-1M with ordinary cached pages; the PC's own
+	   cache must not keep copies either, as for apcdisk's buffer. */
+	p->virt = (unsigned long)__va(phys);
+	p->size = size;
+	if (set_memory_uc(p->virt, size >> PAGE_SHIFT)) {
 		pr_err(APN_NAME ": cannot make the rings uncached\n");
-		set_memory_wb(p->virt, APN_PAGES);
-		free_pages(p->virt, APN_ORDER);
+		set_memory_wb(p->virt, size >> PAGE_SHIFT);
 		goto out_free;
 	}
 	/* Lines cached before the change must not be read stale later. */
 	wbinvd();
 	p->sh = (u32 *)p->virt;
-	memset(p->sh, 0, APN_SIZE);
-	p->phys = virt_to_phys(p->sh);
-	p->txring = (u8 *)p->sh + APN_TXOFF;
-	p->rxring = (u8 *)p->sh + APN_RXOFF;
+	memset(p->sh, 0, size);
+	p->phys = phys;
+	p->rxsize = size / 2;
+	p->txsize = size / 2 - APN_HDRSIZE;
+	p->txring = (u8 *)p->sh + APN_HDRSIZE;
+	p->rxring = (u8 *)p->sh + size / 2;
 
 	dev->base_addr = io;
 	dev->irq = irq;
