@@ -18,7 +18,7 @@
  *
  *   0x310  write: command; read: 0x4E50 if the fast path is there
  *   0x312  write: parameter bits 0-15; read: version (1)
- *   0x314  write: parameter bits 16-31
+ *   0x314  write: parameter bits 16-31; read: how the last attach went
  *   0x316  write: tx_head's low 16 bits, after queueing frames, unless
  *          !PC's tx_busy says it is sending already;
  *          read: what interrupted (APN_INT_*), which also clears it
@@ -80,6 +80,12 @@ MODULE_PARM_DESC(disable, "leave !PC's NE2000 to ne.c");
 #define APN_CMD_DETACH	2
 #define APN_CMD_RXOPTS	3
 #define APN_CMD_RXKICK	4
+
+/* What reading APN_PARHI says about the last attach: */
+#define APN_ATTACH_NONE		0	/* never asked */
+#define APN_ATTACH_PENDING	2	/* asked, not yet carried out */
+#define APN_ATTACH_ADDRESS	(-3)	/* not memory !PC can reach */
+/* or 1, attached, or -1 (no magic word) or -2 (bad layout), as W_STATUS */
 
 #define APN_INT_RX	1
 #define APN_INT_TXSPACE	2
@@ -165,7 +171,7 @@ static inline u32 ring_word(const u8 *ring, u32 size, u32 pos)
 static int apn_attach(struct net_device *dev)
 {
 	struct apn_priv *p = netdev_priv(dev);
-	unsigned long end;
+	unsigned long start, end;
 	int status;
 
 	sh_write(p, W_MAGIC, 0);
@@ -196,12 +202,39 @@ static int apn_attach(struct net_device *dev)
 	/* !PC looks at the block on a callback, once the writes above have
 	   left the Gemini card's write FIFO, which they can't while the OUT
 	   holds the PC in the mailbox; so wait for its answer. */
-	end = jiffies + 2 * HZ;
+	start = jiffies;
+	end = start + 2 * HZ;
 	while (sh_read(p, W_STATUS) == 0 && time_before(jiffies, end))
 		msleep(1);
 	status = sh_read(p, W_STATUS);
 	if (status == 0) {
-		netdev_err(dev, "!PC did not answer the attach\n");
+		/* What !PC says through the mailbox, which nothing caches. */
+		s16 port = inw(dev->base_addr + APN_PARHI);
+
+		netdev_err(dev, "no answer in the shared block after %u ms\n",
+			   jiffies_to_msecs(jiffies - start));
+
+		switch (port) {
+		case APN_ATTACH_NONE:
+			netdev_err(dev, "!PC never got the attach\n");
+			break;
+		case APN_ATTACH_PENDING:
+			netdev_err(dev, "!PC got the attach but hasn't carried "
+				   "it out\n");
+			break;
+		case 1:
+			netdev_err(dev, "!PC attached, but its status word "
+				   "never reached the PC (rings at %08lx: "
+				   "cached?)\n", (unsigned long)p->phys);
+			break;
+		case APN_ATTACH_ADDRESS:
+			netdev_err(dev, "!PC can't reach the rings at %08lx\n",
+				   (unsigned long)p->phys);
+			break;
+		default:
+			netdev_err(dev, "!PC refused the rings (%d), but its "
+				   "status word never reached the PC\n", port);
+		}
 		return -EIO;
 	}
 	if (status != 1) {
