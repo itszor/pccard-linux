@@ -129,7 +129,6 @@ struct apn_priv {
 };
 
 static struct net_device *apn_dev;
-static bool apn_claimed;
 
 static inline u32 sh_read(struct apn_priv *p, int w)
 {
@@ -211,34 +210,34 @@ static int apn_attach(struct net_device *dev)
 		/* What !PC says through the mailbox, which nothing caches. */
 		s16 port = inw(dev->base_addr + APN_PARHI);
 
-		netdev_err(dev, "no answer in the shared block after %u ms\n",
+		pr_err(APN_NAME ": no answer in the shared block after %u ms\n",
 			   jiffies_to_msecs(jiffies - start));
 
 		switch (port) {
 		case APN_ATTACH_NONE:
-			netdev_err(dev, "!PC never got the attach\n");
+			pr_err(APN_NAME ": !PC never got the attach\n");
 			break;
 		case APN_ATTACH_PENDING:
-			netdev_err(dev, "!PC got the attach but hasn't carried "
+			pr_err(APN_NAME ": !PC got the attach but hasn't carried "
 				   "it out\n");
 			break;
 		case 1:
-			netdev_err(dev, "!PC attached, but its status word "
+			pr_err(APN_NAME ": !PC attached, but its status word "
 				   "never reached the PC (rings at %08lx: "
 				   "cached?)\n", (unsigned long)p->phys);
 			break;
 		case APN_ATTACH_ADDRESS:
-			netdev_err(dev, "!PC can't reach the rings at %08lx\n",
+			pr_err(APN_NAME ": !PC can't reach the rings at %08lx\n",
 				   (unsigned long)p->phys);
 			break;
 		default:
-			netdev_err(dev, "!PC refused the rings (%d), but its "
+			pr_err(APN_NAME ": !PC refused the rings (%d), but its "
 				   "status word never reached the PC\n", port);
 		}
 		return -EIO;
 	}
 	if (status != 1) {
-		netdev_err(dev, "!PC refused the rings (status %d)\n", status);
+		pr_err(APN_NAME ": !PC refused the rings (status %d)\n", status);
 		return -EIO;
 	}
 	p->attached = true;
@@ -411,7 +410,7 @@ static int apn_open(struct net_device *dev)
 
 	err = request_irq(dev->irq, apn_interrupt, 0, APN_NAME, dev);
 	if (err) {
-		netdev_err(dev, "IRQ %d is busy\n", dev->irq);
+		pr_err(APN_NAME ": IRQ %d is busy\n", dev->irq);
 		return err;
 	}
 	err = apn_attach(dev);
@@ -457,32 +456,10 @@ static const struct net_device_ops apn_ops = {
 
 /* ---- Setting up ---- */
 
-/*
- * Early, before ne.c probes (from net_olddevs_init, a device initcall):
- * if this !PC has the fast path, take its ports and the NE2000's, so that
- * ne.c finds the NE2000 busy.
- */
-static int __init apn_claim(void)
-{
-	if (disable)
-		return 0;
-	if (!request_region(io, APN_PORTS, APN_NAME))
-		return 0;
-	if (inw(io + APN_CMD) != APN_ID || inw(io + APN_PARLO) != APN_VERSION) {
-		pr_info(APN_NAME ": no fast path at %#x; the NE2000 is "
-			"ne.c's\n", io);
-		release_region(io, APN_PORTS);
-		return 0;
-	}
-	if (!request_region(NE_IO, NE_PORTS, APN_NAME " (NE2000)")) {
-		pr_warn(APN_NAME ": the NE2000's ports are taken\n");
-		release_region(io, APN_PORTS);
-		return 0;
-	}
-	apn_claimed = true;
-	return 0;
-}
-fs_initcall(apn_claim);
+/* Which driver this is, in its messages, to tell builds apart. */
+#define APN_REVISION	3
+
+static struct net_device *apn_found;	/* tried, to be registered */
 
 static void apn_free_rings(struct apn_priv *p)
 {
@@ -490,40 +467,42 @@ static void apn_free_rings(struct apn_priv *p)
 	free_pages(p->virt, APN_ORDER);
 }
 
-static void apn_release(void)
-{
-	release_region(NE_IO, NE_PORTS);
-	release_region(io, APN_PORTS);
-	apn_claimed = false;
-}
-
-static int __init apn_init(void)
+/*
+ * Early, before ne.c probes (from net_olddevs_init, a device initcall):
+ * if this !PC has the fast path, try it - rings, an attach, the Ethernet
+ * address - and only if that works take the NE2000's ports too, so that
+ * ne.c finds them busy. If anything fails, ne.c has the NE2000 as before.
+ */
+static int __init apn_claim(void)
 {
 	struct net_device *dev;
 	struct apn_priv *p;
-	int err;
 
-	if (!apn_claimed)
-		return -ENODEV;
+	if (disable)
+		return 0;
+	if (!request_region(io, APN_PORTS, APN_NAME))
+		return 0;
+	if (inw(io + APN_CMD) != APN_ID || inw(io + APN_PARLO) != APN_VERSION) {
+		pr_info(APN_NAME " %d: no fast path at %#x; the NE2000 is "
+			"ne.c's\n", APN_REVISION, io);
+		goto out_region;
+	}
+	pr_info(APN_NAME " %d: fast path at %#x, trying it\n", APN_REVISION,
+		io);
 
 	dev = alloc_etherdev(sizeof(*p));
-	if (!dev) {
-		err = -ENOMEM;
-		goto out_release;
-	}
+	if (!dev)
+		goto out_region;
 	p = netdev_priv(dev);
 	spin_lock_init(&p->lock);
 
 	p->virt = __get_free_pages(GFP_KERNEL, APN_ORDER);
-	if (!p->virt) {
-		err = -ENOMEM;
+	if (!p->virt)
 		goto out_free;
-	}
 	if (set_memory_uc(p->virt, APN_PAGES)) {
 		pr_err(APN_NAME ": cannot make the rings uncached\n");
 		set_memory_wb(p->virt, APN_PAGES);
 		free_pages(p->virt, APN_ORDER);
-		err = -EIO;
 		goto out_free;
 	}
 	/* Lines cached before the change must not be read stale later. */
@@ -542,8 +521,7 @@ static int __init apn_init(void)
 	dev->max_mtu = ETH_DATA_LEN;
 
 	/* Attach once for the Ethernet address; open attaches again. */
-	err = apn_attach(dev);
-	if (err)
+	if (apn_attach(dev))
 		goto out_rings;
 	dev->dev_addr[0] = sh_read(p, W_MAC0);
 	dev->dev_addr[1] = sh_read(p, W_MAC0) >> 8;
@@ -553,22 +531,51 @@ static int __init apn_init(void)
 	dev->dev_addr[5] = sh_read(p, W_MAC1) >> 8;
 	apn_detach(dev);
 
-	err = register_netdev(dev);
-	if (err)
+	if (!request_region(NE_IO, NE_PORTS, APN_NAME " (NE2000)")) {
+		pr_warn(APN_NAME ": the NE2000's ports are taken\n");
 		goto out_rings;
-	apn_dev = dev;
-	netdev_info(dev, "!PC's NE2000 fast path at %#x, IRQ %d, rings at "
-		    "%08lx, %pM\n", io, irq, (unsigned long)p->phys,
-		    dev->dev_addr);
+	}
+	apn_found = dev;
 	return 0;
 
 out_rings:
 	apn_free_rings(p);
 out_free:
 	free_netdev(dev);
-out_release:
-	apn_release();
-	return err;
+out_region:
+	release_region(io, APN_PORTS);
+	pr_info(APN_NAME ": not used; the NE2000 is ne.c's\n");
+	return 0;
+}
+fs_initcall(apn_claim);
+
+static void apn_release(void)
+{
+	release_region(NE_IO, NE_PORTS);
+	release_region(io, APN_PORTS);
+}
+
+static int __init apn_init(void)
+{
+	struct net_device *dev = apn_found;
+	int err;
+
+	if (!dev)
+		return -ENODEV;
+	apn_found = NULL;
+	err = register_netdev(dev);
+	if (err) {
+		apn_free_rings(netdev_priv(dev));
+		free_netdev(dev);
+		apn_release();
+		return err;
+	}
+	apn_dev = dev;
+	netdev_info(dev, "!PC's NE2000 fast path at %#x, IRQ %d, rings at "
+		    "%08lx, %pM\n", io, irq,
+		    (unsigned long)((struct apn_priv *)netdev_priv(dev))->phys,
+		    dev->dev_addr);
+	return 0;
 }
 
 static void __exit apn_exit(void)
