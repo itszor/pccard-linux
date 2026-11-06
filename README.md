@@ -30,7 +30,16 @@ as HD0 in !PCConfig's Disc setup.
   Its packages come from `archive.debian.org`, checked against Debian's
   retired archive keys.
 - **The network** is DHCP on !PC's NE2000 (PCNE2: IRQ 5, port 0x340), which
-  PCNAT answers.
+  PCNAT answers. With a !PC that has the NE2000's fast path (pcpro3, branch
+  `apcnet`), **apcnet** (`drivers/`, built in) drives the card instead: the
+  frames go through rings in the PC's memory, which !PC reads and writes
+  directly, rather than through the 8390's ports. It takes the NE2000's
+  ports first, so ne.c leaves the card alone; with an older !PC it finds no
+  fast path at 0x310 and ne.c drives the NE2000 as before.
+  `apcnet.disable=1` on the kernel command line does the same. In RPCEmu,
+  a 4MB download over PCNAT took 2.0s rather than 3.7s, and an upload 2.9s
+  rather than 5.7s, with the PC's kernel busy for a quarter and a third as
+  long.
 - **The desktop:** user `pc` is logged in on tty1, and starts X when booted
   with the framebuffer: Xorg's fbdev driver, JWM in RISC OS's colours, and
   ROX-Filer's pinboard with a panel along the bottom, like the icon bar.

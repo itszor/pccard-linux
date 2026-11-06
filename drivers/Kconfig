@@ -8,4 +8,15 @@ config ALEPHPC_APCDISK
 	  gives the PC card, as /dev/apda, /dev/apdb and /dev/apdc, through
 	  !PC's HPC calls.
 
+config ALEPHPC_APCNET
+	bool "The fast path to !PC's NE2000 (apcnet)"
+	depends on X86_32 && NET && ISA
+	help
+	  !PC 3.09's fast path to its NE2000 (PCNE2): frames go through
+	  rings in the PC's memory rather than the 8390's data port, one
+	  mailbox access for each frame sent or batch received rather than
+	  one for each word. When !PC has it, this driver takes the NE2000's
+	  ports so that ne.c leaves the card alone; when !PC hasn't, ne.c
+	  drives the NE2000 as before. apcnet.disable=1 leaves it to ne.c.
+
 endmenu
