@@ -4,6 +4,10 @@
 # Everyday tools
 less iputils-ping nano wget psmisc net-tools iproute openssh-client
 
+# Root for the logged-in user, without a password (setup.sh's sudoers.d/pc):
+# root's empty password works only on the console, not in an xterm
+sudo
+
 # ssh in: its host keys are made at first boot (ssh-hostkeys), not shipped,
 # and it refuses empty passwords, so set one with passwd first
 openssh-server

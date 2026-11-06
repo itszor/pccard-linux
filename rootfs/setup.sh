@@ -50,6 +50,12 @@ rm /etc/skel/.profile.desktop
 id pc >/dev/null 2>&1 ||
 	useradd -m -s /bin/bash -c "PC card" -G audio,video,cdrom,floppy,plugdev pc
 passwd -d pc >/dev/null
+# pc may be root through sudo, with no password, as it has none either. su
+# won't do: pam_unix takes root's empty password only on the ttys in
+# /etc/securetty (nullok_secure), and an xterm's isn't one.
+echo 'pc ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/pc
+chmod 0440 /etc/sudoers.d/pc
+visudo -c -f /etc/sudoers.d/pc >/dev/null
 sed -i 's|^1:2345:respawn:/sbin/getty 38400 tty1$|1:2345:respawn:/sbin/getty --autologin pc 38400 tty1|' \
 	/etc/inittab
 grep -q -- '--autologin pc' /etc/inittab

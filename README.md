@@ -38,10 +38,12 @@ as HD0 in !PCConfig's Disc setup.
   wheezy's Dillo has no HTTPS), and Edit. Ctrl+Alt+T opens a terminal;
   Ctrl+Alt+Backspace leaves the desktop. With an xterm open it uses about
   10MB of the PC's 27MB.
-- **Passwords:** `root` and `pc` have none, for the console. sshd is
-  running, but it refuses empty passwords, so set one (`passwd`) to log in
-  over the network. Its host keys are made at first boot, as the image is
-  shared.
+- **Passwords:** `root` and `pc` have none, for the console. `pc` can be
+  root with `sudo`, which asks for no password (`sudo -i` for a root
+  shell); `su` can't be used, as root's empty password is accepted only on
+  a console tty, not in an xterm. sshd is running, but it refuses empty
+  passwords, so set one (`passwd`) to log in over the network. Its host
+  keys are made at first boot, as the image is shared.
 - **ROX's applications**, in `/usr/local/apps` (the panel's Apps):
   - Edit, Archive, Memo, MIME-Editor and Wallpaper, in Python, on
     ROX-Lib2 (`/usr/local/lib`) and wheezy's pygtk. Each is about 10MB of
