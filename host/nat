@@ -1,0 +1,93 @@
+#!/bin/bash
+# NAT for the Risc PC on eth1, out through this machine's own network, so
+# that it (and !PC's Linux, behind PCNAT) can reach the LAN and the internet.
+#
+#   sudo ./nat on       start
+#   sudo ./nat off      stop, undoing exactly what "on" did
+#   sudo ./nat status   show what is in place
+#
+# Everything is runtime only: a reboot or "firewall-cmd --reload" also
+# undoes it. Nothing else on this machine is changed:
+# - firewalld masquerades only what comes from the Risc PC's network
+#   (a rich rule in the outgoing interface's zone), not the zone as a whole.
+# - eth1 is put in firewalld's trusted zone, as ./setup does; that zone
+#   lets what arrives on it be forwarded.
+# - Docker's FORWARD chain drops routed traffic whatever firewalld allows,
+#   so where Docker is running, two rules in its DOCKER-USER chain (the one
+#   Docker leaves for this) let eth1's traffic out and the replies back.
+# - IP forwarding is turned on only if it was off, and back off by "off".
+#
+# On the Risc PC: gateway 192.168.1.251, and a name server - this LAN's
+# router (192.168.178.1), or any public one.
+set -euo pipefail
+
+RPC_IF=eth1
+RPC_NET=192.168.1.0/24
+STATE=/run/rpc-nat                      # what "on" changed, for "off"
+
+# The interface the default route leaves by, and its firewalld zone.
+wan_if() { ip -4 route show default | awk '{for (i=1; i<NF; i++) if ($i == "dev") { print $(i+1); exit }}'; }
+RULE="rule family=ipv4 source address=$RPC_NET masquerade"
+
+docker_user() { iptables -n -L DOCKER-USER >/dev/null 2>&1; }
+DOCKER_OUT=(-i "$RPC_IF" -j ACCEPT)
+DOCKER_BACK=(-o "$RPC_IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT)
+
+[ "$(id -u)" -eq 0 ] || { echo "run as root (sudo $0 $*)" >&2; exit 1; }
+
+case "${1:-status}" in
+on)
+	WAN=$(wan_if)
+	[ -n "$WAN" ] || { echo "no default route" >&2; exit 1; }
+	ZONE=$(firewall-cmd --get-zone-of-interface="$WAN")
+	mkdir -p "$STATE"
+	echo "$ZONE" > "$STATE/zone"
+
+	firewall-cmd -q --zone=trusted --change-interface="$RPC_IF"
+	firewall-cmd -q --zone="$ZONE" --query-rich-rule="$RULE" ||
+		firewall-cmd -q --zone="$ZONE" --add-rich-rule="$RULE"
+
+	if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = 0 ]; then
+		sysctl -q -w net.ipv4.ip_forward=1
+		touch "$STATE/forward"
+	fi
+
+	if docker_user; then
+		iptables -C DOCKER-USER "${DOCKER_BACK[@]}" 2>/dev/null ||
+			iptables -I DOCKER-USER "${DOCKER_BACK[@]}"
+		iptables -C DOCKER-USER "${DOCKER_OUT[@]}" 2>/dev/null ||
+			iptables -I DOCKER-USER "${DOCKER_OUT[@]}"
+		touch "$STATE/docker"
+	fi
+	echo "NAT on: $RPC_NET on $RPC_IF, out by $WAN (zone $ZONE)"
+	;;
+off)
+	ZONE=$(cat "$STATE/zone" 2>/dev/null || firewall-cmd --get-zone-of-interface="$(wan_if)")
+	firewall-cmd -q --zone="$ZONE" --query-rich-rule="$RULE" &&
+		firewall-cmd -q --zone="$ZONE" --remove-rich-rule="$RULE"
+	if [ -e "$STATE/docker" ] && docker_user; then
+		iptables -D DOCKER-USER "${DOCKER_OUT[@]}" 2>/dev/null || true
+		iptables -D DOCKER-USER "${DOCKER_BACK[@]}" 2>/dev/null || true
+	fi
+	[ -e "$STATE/forward" ] && sysctl -q -w net.ipv4.ip_forward=0
+	rm -rf "$STATE"
+	echo "NAT off ($RPC_IF stays in the trusted zone, as ./setup has it)"
+	;;
+status)
+	WAN=$(wan_if); ZONE=$(firewall-cmd --get-zone-of-interface="$WAN")
+	echo "out by $WAN, zone $ZONE; $RPC_IF in zone $(firewall-cmd --get-zone-of-interface="$RPC_IF" 2>/dev/null || echo none)"
+	if firewall-cmd -q --zone="$ZONE" --query-rich-rule="$RULE"; then
+		echo "masquerading $RPC_NET: yes"
+	else
+		echo "masquerading $RPC_NET: no"
+	fi
+	echo "ip_forward: $(cat /proc/sys/net/ipv4/ip_forward)"
+	if docker_user; then
+		echo "DOCKER-USER:"; iptables -n -L DOCKER-USER --line-numbers | sed 1,2d
+	fi
+	;;
+*)
+	echo "usage: $0 on|off|status" >&2
+	exit 2
+	;;
+esac

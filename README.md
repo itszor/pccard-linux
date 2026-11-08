@@ -63,6 +63,22 @@ as HD0 in !PCConfig's Disc setup.
   `--allow-unauthenticated` (Debian 7's archive keys have expired; see
   `/etc/apt/apt.conf.d/10archive`).
 
+## A real Risc PC's network
+
+`host/` has the two scripts that connect a real Risc PC to the internet
+through a Linux machine (firewalld), so !PC's Linux can get out from
+behind PCNAT. They assume the Risc PC is cabled to that machine's `eth1`
+on 192.168.1.0/24; edit them for another setup:
+
+- `host/setup` gives `eth1` the address 192.168.1.251 and puts it in
+  firewalld's trusted zone.
+- `sudo host/nat on|off|status` masquerades the Risc PC's network out by
+  the default route, with ip_forward and Docker's `DOCKER-USER` chain
+  handled; `off` undoes exactly what `on` did.
+
+On the Risc PC: gateway 192.168.1.251, and any name server. Both scripts
+change only the running system, so a reboot undoes them too.
+
 ## The CPU
 
 The Cyrix 5x86 that Aleph One's cards used is a 486 to Linux, with no TSC,
