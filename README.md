@@ -63,6 +63,9 @@ as HD0 in !PCConfig's Disc setup.
   `--allow-unauthenticated` (Debian 7's archive keys have expired; see
   `/etc/apt/apt.conf.d/10archive`).
 
+`docs/research-notes.md` has the notes this started from: how the card
+and !PC work, HPC, and the sources.
+
 ## A real Risc PC's network
 
 `host/` has the two scripts that connect a real Risc PC to the internet
